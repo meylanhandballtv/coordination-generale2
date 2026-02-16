@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>MeylanHandballTV - Partage de Documents</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<style>
+        .btn-logout {
+            padding: 10px 24px;
+            background: rgba(231, 76, 60, 0.2);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn-logout:hover {
+            background: var(--danger);
+            color: white;
+            transform: translateY(-2px);
+        }
+</style>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>MeylanHandballTV</h1>
+            <p>Coordination Générale - Partage de Documents</p>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" onclick="openCreateFolderModal()">
+                📁 Créer un dossier
+            </button>
+            <button class="btn btn-success" onclick="document.getElementById('fileInput').click()">
+                📤 Importer des fichiers
+            </button>
+            <input type="file" id="fileInput" multiple onchange="handleFileUpload(event)">
+            <a href="index.html" class="btn btn-logout">
+                <i class="fas fa-sign-out-alt"></i> Déconnexion
+            </a>
+        </div>
+
+        <div class="breadcrumb" id="breadcrumb">
+            <span class="breadcrumb-item" onclick="navigateToPath([])">🏠 Accueil</span>
+        </div>
+
+        <div class="content">
+            <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                <div style="font-size: 3em; margin-bottom: 10px;">📤</div>
+                <div style="font-size: 1.1em; font-weight: 600; margin-bottom: 5px;">
+                    Cliquez ou glissez-déposez vos fichiers ici
+                </div>
+                <div style="font-size: 0.9em; color: #6c757d;">
+                    Tous les types de fichiers sont acceptés
+                </div>
+            </div>
+
+            <div class="file-grid" id="fileGrid"></div>
+
+            <div class="empty-state" id="emptyState" style="display: none;">
+                <div class="empty-state-icon">📂</div>
+                <div class="empty-state-text">Aucun fichier ou dossier</div>
+                <div style="color: #adb5bd;">Créez un dossier ou importez des fichiers pour commencer</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal pour créer un dossier -->
+    <div class="modal" id="createFolderModal">
+        <div class="modal-content">
+            <div class="modal-header">Créer un nouveau dossier</div>
+            <div class="form-group">
+                <label for="folderName">Nom du dossier</label>
+                <input type="text" id="folderName" placeholder="Entrez le nom du dossier">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeCreateFolderModal()">Annuler</button>
+                <button class="btn btn-primary" onclick="createFolder()">Créer</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
