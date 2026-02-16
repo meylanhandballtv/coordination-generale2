@@ -92,14 +92,23 @@
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
     
     <script>
-      const firebaseConfig = {
-        apiKey: "TON_API_KEY",
-        authDomain: "TON_PROJET.firebaseapp.com",
-        projectId: "TON_PROJET",
-        storageBucket: "TON_PROJET.appspot.com",
-      };
-    
-      firebase.initializeApp(firebaseConfig);
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "firebase/app";
+        // TODO: Add SDKs for Firebase products that you want to use
+        // https://firebase.google.com/docs/web/setup#available-libraries
+        
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+          apiKey: "AIzaSyDipuuiSxil2tIkWnEhsl0t5sNjMdjWias",
+          authDomain: "coordination-generale.firebaseapp.com",
+          projectId: "coordination-generale",
+          storageBucket: "coordination-generale.firebasestorage.app",
+          messagingSenderId: "356415572474",
+          appId: "1:356415572474:web:26e70ea023d8edf8a07c43"
+        };
+        
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
     </script>
     <script src="script.js"></script>
 </body>
