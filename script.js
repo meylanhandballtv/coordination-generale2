@@ -7,8 +7,6 @@ const firebaseConfig = {
   authDomain: "coordination-generale.firebaseapp.com",
   projectId: "coordination-generale",
   storageBucket: "coordination-generale.firebasestorage.app",
-  messagingSenderId: "356415572474",
-  appId: "1:356415572474:web:26e70ea023d8edf8a07c43"
 };
 
 // Initialiser Firebase
