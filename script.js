@@ -1,17 +1,102 @@
-/* ============================
-   CONFIG FIREBASE
-============================ */
-const db = firebase.firestore();
-const storage = firebase.storage();
+// ============================================
+// CONFIGURATION FIREBASE
+// ============================================
+// Remplacez ces valeurs par votre propre configuration Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyDipuuiSxil2tIkWnEhsl0t5sNjMdjWias",
+  authDomain: "coordination-generale.firebaseapp.com",
+  projectId: "coordination-generale",
+  storageBucket: "coordination-generale.firebasestorage.app",
+  messagingSenderId: "356415572474",
+  appId: "1:356415572474:web:26e70ea023d8edf8a07c43"
+};
 
-/* ============================
-   ÉTAT GLOBAL
-============================ */
+// Initialiser Firebase
+let app, db;
+
+// Structure de données pour stocker les fichiers et dossiers
+let fileSystem = {
+    folders: {},
+    files: {}
+};
+
 let currentPath = [];
 
-/* ============================
-   MODAL DOSSIER
-============================ */
+// ============================================
+// INITIALISATION FIREBASE
+// ============================================
+async function initFirebase() {
+    try {
+        // Initialiser Firebase
+        app = firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+
+        await loadDataFromFirebase();
+        setupRealtimeSync();
+    } catch (error) {
+        console.error('Erreur d\'initialisation Firebase:', error);
+        alert('Erreur de configuration Firebase. Vérifiez votre configuration.');
+    }
+}
+
+// ============================================
+// SYNCHRONISATION FIREBASE
+// ============================================
+async function loadDataFromFirebase() {
+    try {
+        const doc = await db.collection('shared').doc('coordination-generale').get();
+        if (doc.exists) {
+            fileSystem = doc.data().fileSystem || { folders: {}, files: {} };
+        } else {
+            fileSystem = { folders: {}, files: {} };
+            await saveDataToFirebase();
+        }
+        renderFileSystem();
+        updateBreadcrumb();
+    } catch (error) {
+        console.error('Erreur de chargement:', error);
+        alert('Erreur lors du chargement des données');
+    }
+}
+
+async function saveDataToFirebase() {
+    try {
+        await db.collection('shared').doc('coordination-generale').set({
+            fileSystem: fileSystem,
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (error) {
+        console.error('Erreur de sauvegarde:', error);
+        alert('Erreur lors de la sauvegarde des données');
+    }
+}
+
+function setupRealtimeSync() {
+    // Écouter les changements en temps réel
+    db.collection('shared').doc('coordination-generale').onSnapshot((doc) => {
+        if (doc.exists) {
+            const data = doc.data();
+            // Éviter de mettre à jour si c'est notre propre changement
+            if (JSON.stringify(fileSystem) !== JSON.stringify(data.fileSystem)) {
+                fileSystem = data.fileSystem || { folders: {}, files: {} };
+                renderFileSystem();
+                updateBreadcrumb();
+            }
+        }
+    });
+}
+
+// ============================================
+// GESTION DES DOSSIERS ET FICHIERS
+// ============================================
+function getCurrentFolder() {
+    let folder = fileSystem;
+    for (let dir of currentPath) {
+        folder = folder.folders[dir];
+    }
+    return folder;
+}
+
 function openCreateFolderModal() {
     document.getElementById('createFolderModal').classList.add('active');
     document.getElementById('folderName').value = '';
@@ -22,9 +107,6 @@ function closeCreateFolderModal() {
     document.getElementById('createFolderModal').classList.remove('active');
 }
 
-/* ============================
-   DOSSIERS (Firestore)
-============================ */
 async function createFolder() {
     const folderName = document.getElementById('folderName').value.trim();
     if (!folderName) {
@@ -32,55 +114,53 @@ async function createFolder() {
         return;
     }
 
-    const path = currentPath.join('/');
-
-    const existing = await db.collection('folders')
-        .where('path', '==', path)
-        .where('name', '==', folderName)
-        .get();
-
-    if (!existing.empty) {
+    const currentFolder = getCurrentFolder();
+    
+    if (currentFolder.folders[folderName]) {
         alert('Un dossier avec ce nom existe déjà');
         return;
     }
 
-    await db.collection('folders').add({
-        name: folderName,
-        path: path,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    currentFolder.folders[folderName] = {
+        folders: {},
+        files: {},
+        createdAt: new Date().toISOString()
+    };
 
+    await saveDataToFirebase();
     closeCreateFolderModal();
     renderFileSystem();
 }
 
-/* ============================
-   UPLOAD FICHIERS (Storage)
-============================ */
 async function handleFileUpload(event) {
     const files = event.target.files;
-    const folderPath = currentPath.join('/');
+    const currentFolder = getCurrentFolder();
 
     for (let file of files) {
-        const ref = storage.ref(`${folderPath}/${file.name}`);
-        await ref.put(file);
+        // Limiter la taille des fichiers (5MB max)
+        if (file.size > 5 * 1024 * 1024) {
+            alert(`Le fichier "${file.name}" est trop volumineux (max 5MB)`);
+            continue;
+        }
 
-        await db.collection('files').add({
-            name: file.name,
-            path: folderPath,
-            size: file.size,
-            type: file.type,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            currentFolder.files[file.name] = {
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                data: e.target.result,
+                uploadedAt: new Date().toISOString()
+            };
+            await saveDataToFirebase();
+            renderFileSystem();
+        };
+        reader.readAsDataURL(file);
     }
 
     event.target.value = '';
-    renderFileSystem();
 }
 
-/* ============================
-   NAVIGATION
-============================ */
 function navigateToPath(path) {
     currentPath = path;
     renderFileSystem();
@@ -93,119 +173,57 @@ function openFolder(folderName) {
     updateBreadcrumb();
 }
 
-/* ============================
-   SUPPRESSION
-============================ */
+function downloadFile(fileName) {
+    const currentFolder = getCurrentFolder();
+    const file = currentFolder.files[fileName];
+
+    const link = document.createElement('a');
+    link.href = file.data;
+    link.download = file.name;
+    link.click();
+}
+
 async function deleteFolder(folderName) {
-    if (!confirm(`Supprimer le dossier "${folderName}" et son contenu ?`)) return;
+    if (!confirm(`Êtes-vous sûr de vouloir supprimer le dossier "${folderName}" et tout son contenu ?`)) {
+        return;
+    }
 
-    const path = currentPath.join('/');
-
-    const folders = await db.collection('folders')
-        .where('path', '==', path)
-        .where('name', '==', folderName)
-        .get();
-
-    folders.forEach(doc => doc.ref.delete());
-
+    const currentFolder = getCurrentFolder();
+    delete currentFolder.folders[folderName];
+    await saveDataToFirebase();
     renderFileSystem();
 }
 
 async function deleteFile(fileName) {
-    if (!confirm(`Supprimer le fichier "${fileName}" ?`)) return;
-
-    const path = currentPath.join('/');
-
-    const files = await db.collection('files')
-        .where('path', '==', path)
-        .where('name', '==', fileName)
-        .get();
-
-    files.forEach(async doc => {
-        await storage.ref(`${path}/${fileName}`).delete();
-        await doc.ref.delete();
-    });
-
-    renderFileSystem();
-}
-
-/* ============================
-   AFFICHAGE
-============================ */
-async function renderFileSystem() {
-    const fileGrid = document.getElementById('fileGrid');
-    const emptyState = document.getElementById('emptyState');
-    fileGrid.innerHTML = '';
-
-    const path = currentPath.join('/');
-
-    const foldersSnap = await db.collection('folders')
-        .where('path', '==', path)
-        .get();
-
-    const filesSnap = await db.collection('files')
-        .where('path', '==', path)
-        .get();
-
-    if (foldersSnap.empty && filesSnap.empty) {
-        emptyState.style.display = 'block';
+    if (!confirm(`Êtes-vous sûr de vouloir supprimer le fichier "${fileName}" ?`)) {
         return;
     }
 
-    emptyState.style.display = 'none';
-
-    foldersSnap.forEach(doc => {
-        const f = doc.data();
-        const div = document.createElement('div');
-        div.className = 'folder-item';
-        div.innerHTML = `
-            <button class="delete-btn" onclick="event.stopPropagation(); deleteFolder('${f.name}')">✕</button>
-            <div class="icon">📁</div>
-            <div class="item-name">${f.name}</div>
-            <div class="item-info">Dossier</div>
-        `;
-        div.onclick = () => openFolder(f.name);
-        fileGrid.appendChild(div);
-    });
-
-    filesSnap.forEach(doc => {
-        const f = doc.data();
-        const div = document.createElement('div');
-        div.className = 'file-item';
-        div.innerHTML = `
-            <button class="delete-btn" onclick="event.stopPropagation(); deleteFile('${f.name}')">✕</button>
-            <div class="icon">${getFileIcon(f.type)}</div>
-            <div class="item-name">${f.name}</div>
-            <div class="item-info">${formatFileSize(f.size)}</div>
-        `;
-        div.onclick = async () => {
-            const url = await storage.ref(`${path}/${f.name}`).getDownloadURL();
-            window.open(url, '_blank');
-        };
-        fileGrid.appendChild(div);
-    });
+    const currentFolder = getCurrentFolder();
+    delete currentFolder.files[fileName];
+    await saveDataToFirebase();
+    renderFileSystem();
 }
 
-/* ============================
-   BREADCRUMB
-============================ */
+// ============================================
+// INTERFACE UTILISATEUR
+// ============================================
 function updateBreadcrumb() {
     const breadcrumb = document.getElementById('breadcrumb');
-    breadcrumb.innerHTML = `<span class="breadcrumb-item" onclick="navigateToPath([])">🏠 Accueil</span>`;
+    breadcrumb.innerHTML = '<span class="breadcrumb-item" onclick="navigateToPath([])">🏠 Accueil</span>';
 
     let path = [];
-    currentPath.forEach(dir => {
+    for (let i = 0; i < currentPath.length; i++) {
+        const dir = currentPath[i];
         path.push(dir);
+        const pathCopy = [...path];
         breadcrumb.innerHTML += `
             <span class="breadcrumb-separator">/</span>
-            <span class="breadcrumb-item" onclick='navigateToPath(${JSON.stringify(path)})'>${dir}</span>
+            <span class="breadcrumb-item" onclick="navigateToPath(${JSON.stringify(pathCopy).replace(/"/g, '&quot;')})">${dir}</span>
         `;
-    });
+    }
 }
 
-/* ============================
-   UTILITAIRES
-============================ */
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -215,24 +233,70 @@ function formatFileSize(bytes) {
 }
 
 function getFileIcon(type) {
-    if (!type) return '📎';
     if (type.includes('pdf')) return '📄';
-    if (type.includes('word')) return '📝';
-    if (type.includes('excel')) return '📊';
-    if (type.includes('presentation')) return '📽️';
+    if (type.includes('word') || type.includes('document')) return '📝';
+    if (type.includes('excel') || type.includes('spreadsheet')) return '📊';
+    if (type.includes('powerpoint') || type.includes('presentation')) return '📽️';
     if (type.includes('image')) return '🖼️';
     if (type.includes('video')) return '🎥';
     if (type.includes('audio')) return '🎵';
-    if (type.includes('zip')) return '🗜️';
+    if (type.includes('zip') || type.includes('rar')) return '🗜️';
     return '📎';
 }
 
-/* ============================
-   DRAG & DROP
-============================ */
+function renderFileSystem() {
+    const currentFolder = getCurrentFolder();
+    const fileGrid = document.getElementById('fileGrid');
+    const emptyState = document.getElementById('emptyState');
+
+    fileGrid.innerHTML = '';
+
+    const folderNames = Object.keys(currentFolder.folders).sort();
+    const fileNames = Object.keys(currentFolder.files).sort();
+
+    if (folderNames.length === 0 && fileNames.length === 0) {
+        emptyState.style.display = 'block';
+        return;
+    }
+
+    emptyState.style.display = 'none';
+
+    // Afficher les dossiers
+    folderNames.forEach(folderName => {
+        const folderDiv = document.createElement('div');
+        folderDiv.className = 'folder-item';
+        folderDiv.innerHTML = `
+            <button class="delete-btn" onclick="event.stopPropagation(); deleteFolder('${folderName}')">✕</button>
+            <div class="icon">📁</div>
+            <div class="item-name">${folderName}</div>
+            <div class="item-info">Dossier</div>
+        `;
+        folderDiv.onclick = () => openFolder(folderName);
+        fileGrid.appendChild(folderDiv);
+    });
+
+    // Afficher les fichiers
+    fileNames.forEach(fileName => {
+        const file = currentFolder.files[fileName];
+        const fileDiv = document.createElement('div');
+        fileDiv.className = 'file-item';
+        fileDiv.innerHTML = `
+            <button class="delete-btn" onclick="event.stopPropagation(); deleteFile('${fileName}')">✕</button>
+            <div class="icon">${getFileIcon(file.type)}</div>
+            <div class="item-name">${file.name}</div>
+            <div class="item-info">${formatFileSize(file.size)}</div>
+        `;
+        fileDiv.onclick = () => downloadFile(fileName);
+        fileGrid.appendChild(fileDiv);
+    });
+}
+
+// ============================================
+// DRAG AND DROP
+// ============================================
 const uploadArea = document.getElementById('uploadArea');
 
-uploadArea.addEventListener('dragover', e => {
+uploadArea.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadArea.classList.add('drag-over');
 });
@@ -241,14 +305,33 @@ uploadArea.addEventListener('dragleave', () => {
     uploadArea.classList.remove('drag-over');
 });
 
-uploadArea.addEventListener('drop', e => {
+uploadArea.addEventListener('drop', (e) => {
     e.preventDefault();
     uploadArea.classList.remove('drag-over');
-    handleFileUpload({ target: { files: e.dataTransfer.files } });
+    
+    const files = e.dataTransfer.files;
+    const event = { target: { files: files } };
+    handleFileUpload(event);
 });
 
-/* ============================
-   INIT
-============================ */
-renderFileSystem();
-updateBreadcrumb();
+// ============================================
+// GESTION DES MODALS
+// ============================================
+document.getElementById('createFolderModal').addEventListener('click', (e) => {
+    if (e.target.id === 'createFolderModal') {
+        closeCreateFolderModal();
+    }
+});
+
+document.getElementById('folderName').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        createFolder();
+    }
+});
+
+// ============================================
+// INITIALISATION
+// ============================================
+window.addEventListener('load', () => {
+    initFirebase();
+});
