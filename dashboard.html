@@ -86,6 +86,21 @@
         </div>
     </div>
 
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+    
+    <script>
+      const firebaseConfig = {
+        apiKey: "TON_API_KEY",
+        authDomain: "TON_PROJET.firebaseapp.com",
+        projectId: "TON_PROJET",
+        storageBucket: "TON_PROJET.appspot.com",
+      };
+    
+      firebase.initializeApp(firebaseConfig);
+    </script>
     <script src="script.js"></script>
 </body>
 </html>
