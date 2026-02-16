@@ -1,162 +1,211 @@
-// Structure de données pour stocker les fichiers et dossiers
-let fileSystem = {
-    folders: {},
-    files: {}
-};
+/* ============================
+   CONFIG FIREBASE
+============================ */
+const db = firebase.firestore();
+const storage = firebase.storage();
 
+/* ============================
+   ÉTAT GLOBAL
+============================ */
 let currentPath = [];
 
-// Charger les données depuis localStorage
-function loadData() {
-    const saved = localStorage.getItem('meylanHandballDocs');
-    if (saved) {
-        fileSystem = JSON.parse(saved);
-    }
-}
-
-// Sauvegarder les données dans localStorage
-function saveData() {
-    localStorage.setItem('meylanHandballDocs', JSON.stringify(fileSystem));
-}
-
-// Obtenir le dossier courant
-function getCurrentFolder() {
-    let folder = fileSystem;
-    for (let dir of currentPath) {
-        folder = folder.folders[dir];
-    }
-    return folder;
-}
-
-// Ouvrir le modal de création de dossier
+/* ============================
+   MODAL DOSSIER
+============================ */
 function openCreateFolderModal() {
     document.getElementById('createFolderModal').classList.add('active');
     document.getElementById('folderName').value = '';
     document.getElementById('folderName').focus();
 }
 
-// Fermer le modal de création de dossier
 function closeCreateFolderModal() {
     document.getElementById('createFolderModal').classList.remove('active');
 }
 
-// Créer un nouveau dossier
-function createFolder() {
+/* ============================
+   DOSSIERS (Firestore)
+============================ */
+async function createFolder() {
     const folderName = document.getElementById('folderName').value.trim();
     if (!folderName) {
         alert('Veuillez entrer un nom de dossier');
         return;
     }
 
-    const currentFolder = getCurrentFolder();
-    
-    if (currentFolder.folders[folderName]) {
+    const path = currentPath.join('/');
+
+    const existing = await db.collection('folders')
+        .where('path', '==', path)
+        .where('name', '==', folderName)
+        .get();
+
+    if (!existing.empty) {
         alert('Un dossier avec ce nom existe déjà');
         return;
     }
 
-    currentFolder.folders[folderName] = {
-        folders: {},
-        files: {},
-        createdAt: new Date().toISOString()
-    };
+    await db.collection('folders').add({
+        name: folderName,
+        path: path,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
 
-    saveData();
     closeCreateFolderModal();
     renderFileSystem();
 }
 
-// Gérer l'upload de fichiers
-function handleFileUpload(event) {
+/* ============================
+   UPLOAD FICHIERS (Storage)
+============================ */
+async function handleFileUpload(event) {
     const files = event.target.files;
-    const currentFolder = getCurrentFolder();
+    const folderPath = currentPath.join('/');
 
     for (let file of files) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            currentFolder.files[file.name] = {
-                name: file.name,
-                size: file.size,
-                type: file.type,
-                data: e.target.result,
-                uploadedAt: new Date().toISOString()
-            };
-            saveData();
-            renderFileSystem();
-        };
-        reader.readAsDataURL(file);
+        const ref = storage.ref(`${folderPath}/${file.name}`);
+        await ref.put(file);
+
+        await db.collection('files').add({
+            name: file.name,
+            path: folderPath,
+            size: file.size,
+            type: file.type,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
     }
 
     event.target.value = '';
+    renderFileSystem();
 }
 
-// Naviguer vers un chemin
+/* ============================
+   NAVIGATION
+============================ */
 function navigateToPath(path) {
     currentPath = path;
     renderFileSystem();
     updateBreadcrumb();
 }
 
-// Ouvrir un dossier
 function openFolder(folderName) {
     currentPath.push(folderName);
     renderFileSystem();
     updateBreadcrumb();
 }
 
-// Télécharger un fichier
-function downloadFile(fileName) {
-    const currentFolder = getCurrentFolder();
-    const file = currentFolder.files[fileName];
+/* ============================
+   SUPPRESSION
+============================ */
+async function deleteFolder(folderName) {
+    if (!confirm(`Supprimer le dossier "${folderName}" et son contenu ?`)) return;
 
-    const link = document.createElement('a');
-    link.href = file.data;
-    link.download = file.name;
-    link.click();
-}
+    const path = currentPath.join('/');
 
-// Supprimer un dossier
-function deleteFolder(folderName) {
-    if (!confirm(`Êtes-vous sûr de vouloir supprimer le dossier "${folderName}" et tout son contenu ?`)) {
-        return;
-    }
+    const folders = await db.collection('folders')
+        .where('path', '==', path)
+        .where('name', '==', folderName)
+        .get();
 
-    const currentFolder = getCurrentFolder();
-    delete currentFolder.folders[folderName];
-    saveData();
+    folders.forEach(doc => doc.ref.delete());
+
     renderFileSystem();
 }
 
-// Supprimer un fichier
-function deleteFile(fileName) {
-    if (!confirm(`Êtes-vous sûr de vouloir supprimer le fichier "${fileName}" ?`)) {
-        return;
-    }
+async function deleteFile(fileName) {
+    if (!confirm(`Supprimer le fichier "${fileName}" ?`)) return;
 
-    const currentFolder = getCurrentFolder();
-    delete currentFolder.files[fileName];
-    saveData();
+    const path = currentPath.join('/');
+
+    const files = await db.collection('files')
+        .where('path', '==', path)
+        .where('name', '==', fileName)
+        .get();
+
+    files.forEach(async doc => {
+        await storage.ref(`${path}/${fileName}`).delete();
+        await doc.ref.delete();
+    });
+
     renderFileSystem();
 }
 
-// Mettre à jour le fil d'Ariane
+/* ============================
+   AFFICHAGE
+============================ */
+async function renderFileSystem() {
+    const fileGrid = document.getElementById('fileGrid');
+    const emptyState = document.getElementById('emptyState');
+    fileGrid.innerHTML = '';
+
+    const path = currentPath.join('/');
+
+    const foldersSnap = await db.collection('folders')
+        .where('path', '==', path)
+        .get();
+
+    const filesSnap = await db.collection('files')
+        .where('path', '==', path)
+        .get();
+
+    if (foldersSnap.empty && filesSnap.empty) {
+        emptyState.style.display = 'block';
+        return;
+    }
+
+    emptyState.style.display = 'none';
+
+    foldersSnap.forEach(doc => {
+        const f = doc.data();
+        const div = document.createElement('div');
+        div.className = 'folder-item';
+        div.innerHTML = `
+            <button class="delete-btn" onclick="event.stopPropagation(); deleteFolder('${f.name}')">✕</button>
+            <div class="icon">📁</div>
+            <div class="item-name">${f.name}</div>
+            <div class="item-info">Dossier</div>
+        `;
+        div.onclick = () => openFolder(f.name);
+        fileGrid.appendChild(div);
+    });
+
+    filesSnap.forEach(doc => {
+        const f = doc.data();
+        const div = document.createElement('div');
+        div.className = 'file-item';
+        div.innerHTML = `
+            <button class="delete-btn" onclick="event.stopPropagation(); deleteFile('${f.name}')">✕</button>
+            <div class="icon">${getFileIcon(f.type)}</div>
+            <div class="item-name">${f.name}</div>
+            <div class="item-info">${formatFileSize(f.size)}</div>
+        `;
+        div.onclick = async () => {
+            const url = await storage.ref(`${path}/${f.name}`).getDownloadURL();
+            window.open(url, '_blank');
+        };
+        fileGrid.appendChild(div);
+    });
+}
+
+/* ============================
+   BREADCRUMB
+============================ */
 function updateBreadcrumb() {
     const breadcrumb = document.getElementById('breadcrumb');
-    breadcrumb.innerHTML = '<span class="breadcrumb-item" onclick="navigateToPath([])">🏠 Accueil</span>';
+    breadcrumb.innerHTML = `<span class="breadcrumb-item" onclick="navigateToPath([])">🏠 Accueil</span>`;
 
     let path = [];
-    for (let i = 0; i < currentPath.length; i++) {
-        const dir = currentPath[i];
+    currentPath.forEach(dir => {
         path.push(dir);
-        const pathCopy = [...path];
         breadcrumb.innerHTML += `
             <span class="breadcrumb-separator">/</span>
-            <span class="breadcrumb-item" onclick="navigateToPath(${JSON.stringify(pathCopy).replace(/"/g, '&quot;')})">${dir}</span>
+            <span class="breadcrumb-item" onclick='navigateToPath(${JSON.stringify(path)})'>${dir}</span>
         `;
-    }
+    });
 }
 
-// Formater la taille du fichier
+/* ============================
+   UTILITAIRES
+============================ */
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -165,71 +214,25 @@ function formatFileSize(bytes) {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 }
 
-// Obtenir l'icône du fichier
 function getFileIcon(type) {
+    if (!type) return '📎';
     if (type.includes('pdf')) return '📄';
-    if (type.includes('word') || type.includes('document')) return '📝';
-    if (type.includes('excel') || type.includes('spreadsheet')) return '📊';
-    if (type.includes('powerpoint') || type.includes('presentation')) return '📽️';
+    if (type.includes('word')) return '📝';
+    if (type.includes('excel')) return '📊';
+    if (type.includes('presentation')) return '📽️';
     if (type.includes('image')) return '🖼️';
     if (type.includes('video')) return '🎥';
     if (type.includes('audio')) return '🎵';
-    if (type.includes('zip') || type.includes('rar')) return '🗜️';
+    if (type.includes('zip')) return '🗜️';
     return '📎';
 }
 
-// Rendre le système de fichiers
-function renderFileSystem() {
-    const currentFolder = getCurrentFolder();
-    const fileGrid = document.getElementById('fileGrid');
-    const emptyState = document.getElementById('emptyState');
-
-    fileGrid.innerHTML = '';
-
-    const folderNames = Object.keys(currentFolder.folders).sort();
-    const fileNames = Object.keys(currentFolder.files).sort();
-
-    if (folderNames.length === 0 && fileNames.length === 0) {
-        emptyState.style.display = 'block';
-        return;
-    }
-
-    emptyState.style.display = 'none';
-
-    // Afficher les dossiers
-    folderNames.forEach(folderName => {
-        const folderDiv = document.createElement('div');
-        folderDiv.className = 'folder-item';
-        folderDiv.innerHTML = `
-            <button class="delete-btn" onclick="event.stopPropagation(); deleteFolder('${folderName}')">✕</button>
-            <div class="icon">📁</div>
-            <div class="item-name">${folderName}</div>
-            <div class="item-info">Dossier</div>
-        `;
-        folderDiv.onclick = () => openFolder(folderName);
-        fileGrid.appendChild(folderDiv);
-    });
-
-    // Afficher les fichiers
-    fileNames.forEach(fileName => {
-        const file = currentFolder.files[fileName];
-        const fileDiv = document.createElement('div');
-        fileDiv.className = 'file-item';
-        fileDiv.innerHTML = `
-            <button class="delete-btn" onclick="event.stopPropagation(); deleteFile('${fileName}')">✕</button>
-            <div class="icon">${getFileIcon(file.type)}</div>
-            <div class="item-name">${file.name}</div>
-            <div class="item-info">${formatFileSize(file.size)}</div>
-        `;
-        fileDiv.onclick = () => downloadFile(fileName);
-        fileGrid.appendChild(fileDiv);
-    });
-}
-
-// Drag and drop
+/* ============================
+   DRAG & DROP
+============================ */
 const uploadArea = document.getElementById('uploadArea');
 
-uploadArea.addEventListener('dragover', (e) => {
+uploadArea.addEventListener('dragover', e => {
     e.preventDefault();
     uploadArea.classList.add('drag-over');
 });
@@ -238,30 +241,14 @@ uploadArea.addEventListener('dragleave', () => {
     uploadArea.classList.remove('drag-over');
 });
 
-uploadArea.addEventListener('drop', (e) => {
+uploadArea.addEventListener('drop', e => {
     e.preventDefault();
     uploadArea.classList.remove('drag-over');
-    
-    const files = e.dataTransfer.files;
-    const event = { target: { files: files } };
-    handleFileUpload(event);
+    handleFileUpload({ target: { files: e.dataTransfer.files } });
 });
 
-// Gestion du clic en dehors du modal
-document.getElementById('createFolderModal').addEventListener('click', (e) => {
-    if (e.target.id === 'createFolderModal') {
-        closeCreateFolderModal();
-    }
-});
-
-// Gestion de la touche Enter dans le champ du nom de dossier
-document.getElementById('folderName').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        createFolder();
-    }
-});
-
-// Initialisation au chargement de la page
-loadData();
+/* ============================
+   INIT
+============================ */
 renderFileSystem();
 updateBreadcrumb();
